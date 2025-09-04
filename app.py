@@ -152,20 +152,37 @@ def theme_counts(user_id: str, last_n: int = 10) -> Dict[str, int]:
 
 # ---- Model call ----
 def summarize_with_gemini(text: str) -> Dict:
-    model = GenerativeModel(VERTEX_MODEL, credentials=creds)
+    from vertexai.generative_models import GenerativeModel
+    model = GenerativeModel(VERTEX_MODEL)   # <-- no credentials kwarg
+
     prompt = GEN_TEMPLATE.format(system=SYSTEM_PROMPT, text=text)
-    resp = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-    try:
-        data = json.loads(resp.text)
-    except Exception:
-        prompt2 = prompt + "\n\nIMPORTANT: Output MUST be valid JSON only, no commentary."
-        resp2 = model.generate_content(prompt2, generation_config={"response_mime_type": "application/json"})
-        data = json.loads(resp2.text)
-    if "themes" in data and isinstance(data["themes"], list):
+    with st.spinner("Summarizing..."):
+        try:
+            resp = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
+            )
+            try:
+                data = json.loads(resp.text)
+            except Exception:
+                # retry once with stricter instruction
+                prompt2 = prompt + "\n\nIMPORTANT: Output MUST be valid JSON only, no commentary."
+                resp2 = model.generate_content(
+                    prompt2,
+                    generation_config={"response_mime_type": "application/json"}
+                )
+                data = json.loads(resp2.text)
+        except Exception as e:
+            st.error(f"Model call failed: {e}")
+            raise
+
+    # normalize theme names
+    if isinstance(data.get("themes"), list):
         for t in data["themes"]:
             if isinstance(t, dict) and "name" in t:
-                t["name"] = to_title(t["name"])
+                t["name"] = (t["name"] or "").strip().title()
     return data
+
 
 # ---- UI ----
 st.set_page_config(page_title="Journal AI", layout="centered")
